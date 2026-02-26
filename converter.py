@@ -397,14 +397,15 @@ def build_xml(parsed, jm):
         f'      <journal-id journal-id-type="nlm-ta">{xe(jm.get("publisher","IP Innovative Publication"))}</journal-id>',
         f'      <journal-id journal-id-type="publisher-id">{xe(jm.get("publisher","IP Innovative Publication"))}</journal-id>',
     ]
+    # journal URL goes in self-uri, not journal-id (invalid type per PMC)
     if jm.get('journalUrl'):
-        L.append(f'      <journal-id journal-id-type="journal_submission_guidelines">{xe(jm["journalUrl"])}</journal-id>')
+        L.append(f'      <self-uri xlink:href="{xe(jm["journalUrl"])}"/>')
     L.append('      <journal-title-group>')
     L.append(f'        <journal-title>{xe(jm.get("name",""))}</journal-title>')
     L.append('      </journal-title-group>')
     # PMC rule: @publication-format not @pub-type
-    if jm.get('issnPrint'): L.append(f'      <issn publication-format="print">{xe(jm["issnPrint"])}</issn>')
-    if jm.get('issnElec'): L.append(f'      <issn publication-format="electronic">{xe(jm["issnElec"])}</issn>')
+    if jm.get('issnPrint'): L.append(f'      <issn publication-format="print">{xe(jm["issnPrint"].strip())}</issn>')
+    if jm.get('issnElec'): L.append(f'      <issn publication-format="electronic">{xe(jm["issnElec"].strip())}</issn>')
     L.append('    </journal-meta>')
     L.append('')
 
