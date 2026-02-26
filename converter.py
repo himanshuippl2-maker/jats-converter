@@ -381,6 +381,7 @@ def build_xml(parsed, jm):
         '<!DOCTYPE article PUBLIC "-//NLM//DTD JATS (Z39.96) Journal Publishing DTD v1.2 20190208//EN"',
         '  "JATS-journalpublishing1-2.dtd">',
         f'<article xmlns:xlink="http://www.w3.org/1999/xlink"',
+        f'         xmlns:ali="http://www.niso.org/schemas/ali/1.0/"',
         f'         article-type="{jm.get("articleType","research-article")}"',
         f'         xml:lang="en">',
         '',
@@ -404,7 +405,7 @@ def build_xml(parsed, jm):
     if jm.get('issnPrint'): L.append(f'      <issn publication-format="print">{xe(jm["issnPrint"].strip())}</issn>')
     if jm.get('issnElec'): L.append(f'      <issn publication-format="electronic">{xe(jm["issnElec"].strip())}</issn>')
     if jm.get('journalUrl'):
-        L.append(f'      <self-uri xlink:href="{xe(jm["journalUrl"])}"/>')
+        L.append(f'      <self-uri xlink:href="{xe(jm["journalUrl"])}" xlink:title="{xe(jm.get("name","Journal Website"))}"/>')
     L.append('    </journal-meta>')
     L.append('')
 
@@ -476,7 +477,7 @@ def build_xml(parsed, jm):
             '        </corresp>',
         ]
     L += [
-        '        <fn fn-type="conflict">',
+        '        <fn fn-type="coi-statement">',
         '          <p>None declared.</p>',
         '        </fn>',
         '        <fn fn-type="financial-disclosure">',
@@ -516,12 +517,13 @@ def build_xml(parsed, jm):
     yr = jm.get('year','2025')
     L += [
         '      <permissions>',
-        f'        <copyright-statement>© {yr} The Author(s)</copyright-statement>',
+        f'        <copyright-statement>© {yr} {xe(jm.get("publisher","IP Innovative Publication"))}</copyright-statement>',
         f'        <copyright-year>{yr}</copyright-year>',
-        '        <license license-type="open-access" xlink:href="https://creativecommons.org/licenses/by-nc/4.0/">',
+        f'        <copyright-holder>{xe(jm.get("publisher","IP Innovative Publication"))}</copyright-holder>',
+        f'        <license license-type="open-access" xlink:href="{jm.get('licenseUrl','https://creativecommons.org/licenses/by-nc/4.0/')}">',
+        f'          <ali:license_ref>{jm.get('licenseUrl','https://creativecommons.org/licenses/by-nc/4.0/')}</ali:license_ref>',
         '          <license-p>This is an Open Access article distributed under the terms of the',
-        '          Creative Commons Attribution-NonCommercial 4.0 International License',
-        '          (<ext-link ext-link-type="uri" xlink:href="https://creativecommons.org/licenses/by-nc/4.0/">https://creativecommons.org/licenses/by-nc/4.0/</ext-link>)',
+        f'          <ext-link ext-link-type="uri" xlink:href="{jm.get('licenseUrl','https://creativecommons.org/licenses/by-nc/4.0/')}" xlink:title="Creative Commons License">Creative Commons Attribution-NonCommercial 4.0 International License</ext-link>',
         '          which permits unrestricted non-commercial use, distribution, and reproduction',
         '          in any medium, provided the original work is properly cited.</license-p>',
         '        </license>',
@@ -631,8 +633,28 @@ def build_xml(parsed, jm):
             vol_r = cr.get('volume') or p.get('volume','')
             iss_r = cr.get('issue') or p.get('issue','')
             cr_pg = cr.get('pages','')
-            if cr_pg and '-' in cr_pg: fp_r,lp_r = cr_pg.split('-',1)
-            else: fp_r=cr_pg or p.get('fpage',''); lp_r=p.get('lpage','')
+            if cr_pg and '-' in cr_pg:
+                fp_r, lp_r = cr_pg.split('-', 1)
+                # Fix abbreviated lpage: "503-18" means 503-518
+                try:
+                    fp_int, lp_int = int(fp_r.strip()), int(lp_r.strip())
+                    if lp_int < fp_int:
+                        # Expand: replace last N digits of fpage with lpage
+                        prefix = str(fp_int)[:len(str(fp_int))-len(str(lp_int))]
+                        lp_r = prefix + str(lp_int)
+                except: pass
+            else:
+                fp_r = cr_pg or p.get('fpage','')
+                lp_r = p.get('lpage','')
+            # Also fix parsed lpage from docx
+            if not cr_pg:
+                try:
+                    fp_int = int(fp_r.strip()) if fp_r.strip().isdigit() else 0
+                    lp_int = int(lp_r.strip()) if lp_r.strip().isdigit() else 0
+                    if lp_int and fp_int and lp_int < fp_int:
+                        prefix = str(fp_int)[:len(str(fp_int))-len(str(lp_int))]
+                        lp_r = prefix + str(lp_int)
+                except: pass
             ti_r = cr.get('title') or p.get('title','')
             pub_t = p.get('pubType','journal')
 
