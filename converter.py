@@ -842,7 +842,8 @@ def build_fig_xml(fig, pfx):
               f'          <title id="{ctid}">{xe(cap)}</title>',
               '        </caption>']
     # Graphic placeholder (actual image not embedded — note added)
-    L.append(f'        <graphic xlink:href="fig{fig['num']}" mimetype="image" mime-subtype="jpeg"/>')
+    fig_num = fig['num']
+    L.append(f'        <graphic xlink:href="fig{fig_num}" mimetype="image" mime-subtype="jpeg"/>')
     L.append('      </fig>')
     return L
 
