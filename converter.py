@@ -148,9 +148,22 @@ def parse_ref(raw):
             r['journal'] = tm.group(2).split('.')[0].strip()
         else:
             r['title'] = rest_str.split('.')[0].strip()
-    else:
-        # Fallback: first sentence = authors+title
-        r['title'] = clean.split('.')[0].strip()
+
+    # Fallback: if no authors parsed, use broader unicode-aware regex
+    if not r['authors']:
+        fa = re.match(
+            r'^((?:[\w\u00C0-\u024F][^\d\.]{0,25}\s+[A-Z]{1,3},?\s*)+?)(?:et al\.?,?\s*)?\. ([A-Z].*)',
+            clean)
+        if fa:
+            for ap in re.split(r',\s*', fa.group(1)):
+                ap = ap.strip().rstrip('.,')
+                if re.search(r'et al\.?$', ap, re.I): r['hasEtAl']=True; break
+                pn = parse_author_name(ap)
+                if pn['surname'] and len(pn['surname']) > 1: r['authors'].append(pn)
+            if r['authors'] and not r['title']:
+                r['title'] = fa.group(2).split('.')[0].strip()
+        if not r['title']:
+            r['title'] = clean.split('.')[0].strip()
 
     return r
 
@@ -766,6 +779,13 @@ def build_xml(parsed, jm):
                     L.append('            </name>')
                 if p.get('hasEtAl'): L.append('            <etal/>')
                 L.append('          </person-group>')
+            else:
+                # PMC requires person-group — add anonymous fallback
+                L += ['          <person-group person-group-type="author">',
+                      '            <name name-style="western">',
+                      '              <surname>Anonymous</surname>',
+                      '            </name>',
+                      '          </person-group>']
 
             if title_r:   L.append(f'          <article-title>{xe(title_r)}</article-title>')
             if journal_r: L.append(f'          <source>{xe(journal_r)}</source>')
@@ -777,7 +797,13 @@ def build_xml(parsed, jm):
             if doi and '/' in doi:  L.append(f'          <pub-id pub-id-type="doi">{xe(doi)}</pub-id>')
             if pmid:      L.append(f'          <pub-id pub-id-type="pmid">{xe(pmid)}</pub-id>')
             if not authors and not title_r:
-                L.append(f'          <!-- RAW: {xe(ref["raw"][:200])} -->')
+                # Fallback: add collab or raw text as title
+                L.append(f'          <person-group person-group-type="author">')
+                L.append(f'            <name name-style="western">')
+                L.append(f'              <surname>Unknown</surname>')
+                L.append(f'            </n>')
+                L.append(f'          </person-group>')
+                L.append(f'          <article-title>{xe(ref["raw"][:200])}</article-title>')
             L += ['        </element-citation>','      </ref>']
         L.append('    </ref-list>')
     L += ['  </back>','','</article>']
@@ -843,7 +869,10 @@ def build_fig_xml(fig, pfx):
               '        </caption>']
     # Graphic placeholder (actual image not embedded — note added)
     fig_num = fig['num']
-    L.append(f'        <graphic xlink:href="fig{fig_num}" mimetype="image" mime-subtype="jpeg"/>')
+    fig_cap = fig.get('caption','Figure') or 'Figure'
+    L.append(f'        <graphic xlink:href="fig{fig_num}" mimetype="image" mime-subtype="jpeg">')
+    L.append(f'          <alt-text>{xe(fig_cap)}</alt-text>')
+    L.append(f'        </graphic>')
     L.append('      </fig>')
     return L
 
