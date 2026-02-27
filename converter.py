@@ -640,7 +640,8 @@ def build_xml(parsed, jm):
     L.append('  <body>')
     for sec in parsed.get('sections',[]):
         st = sec.get('sec_type')
-        L.append(f'    <sec{f" sec-type=\"{st}\"" if st else ""}>')
+        sec_attr = f' sec-type="{st}"' if st else ''
+        L.append(f'    <sec{sec_attr}>')
         tid = nid(pfx,'title'); L.append(f'      <title id="{tid}">{xe(sec["title"])}</title>')
 
         for para in sec.get('paragraphs',[]):
@@ -654,7 +655,8 @@ def build_xml(parsed, jm):
 
         for sub in sec.get('subsections',[]):
             sst = sub.get('sec_type')
-            L.append(f'      <sec{f" sec-type=\"{sst}\"" if sst else ""}>')
+            sub_attr = f' sec-type="{sst}"' if sst else ''
+            L.append(f'      <sec{sub_attr}>')
             stid = nid(pfx,'title'); L.append(f'        <title id="{stid}">{xe(sub["title"])}</title>')
             for para in sub.get('paragraphs',[]):
                 inline = para_to_inline(para, pfx, cite_ids, table_ids, fig_ids)
