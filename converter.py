@@ -104,7 +104,12 @@ def parse_ref(raw):
     # DOI
     for pat in [r'https?://doi\.org/(10\.[^\s,;\]]+)', r'\bDOI:?\s*(10\.[^\s,;\]]+)', r'\b(10\.\d{4,}/[^\s,;\]]+)']:
         dm = re.search(pat, raw, re.I)
-        if dm: r['doi'] = dm.group(1).rstrip('.,]'); break
+        if dm:
+            doi_val = dm.group(1).rstrip('.,]')
+            # DOI must contain "/" to be valid (prefix/suffix)
+            if '/' in doi_val:
+                r['doi'] = doi_val
+            break
 
     clean = re.sub(r'https?://\S+','',raw).strip()
     if re.search(r'\[dissertation\]|\[thesis\]', clean, re.I): r['pubType']='thesis'
@@ -339,7 +344,7 @@ def _fmt_chunk(t, rd, pfx):
 def parse_docx(path, use_crossref=True):
     doc = Document(path)
     parsed = {
-        'title':'','authors':[],'affiliations':{},'abstract':{},'keywords':[],
+        'title':'','authors':[],'affiliations':{},'abstract':{},'keywords':[],'figures':[],
         'receivedDate':'','acceptedDate':'','sections':[],'references':[],'tables':[],
     }
     cur_sec = cur_sub = None; ref_num = 1; tbl_caption_num = 0
@@ -422,6 +427,41 @@ def parse_docx(path, use_crossref=True):
                 if not found:
                     parsed['tables'].append({'num':tnum,'caption':txt,'rows':[],'colwidths':[],'placed':False})
 
+        elif sty in ('Caption', 'Figure Caption', 'Image Caption'):
+            if txt:
+                fm = re.search(r'(Fig\.?\s*|Figure\s*)(\d+)', txt, re.I)
+                fnum = int(fm.group(2)) if fm else (len(parsed['figures'])+1)
+                found = False
+                for fig in parsed['figures']:
+                    if fig['num'] == fnum: fig['caption']=txt; found=True; break
+                if not found:
+                    parsed['figures'].append({'num':fnum,'caption':txt,'placed':False,'has_image':False})
+
+    # Detect inline images and associate with figure captions
+    fig_counter = 0
+    for i, para in enumerate(doc.paragraphs):
+        xml_str = para._element.xml
+        has_image = ('drawing' in xml_str or 'pic:' in xml_str or 'blipFill' in xml_str)
+        if has_image:
+            # Look for caption in adjacent paragraphs
+            for offset in [1, 2, -1]:
+                adj_idx = i + offset
+                if 0 <= adj_idx < len(doc.paragraphs):
+                    adj = doc.paragraphs[adj_idx]
+                    adj_txt = adj.text.strip()
+                    if re.search(r'(Fig\.?\s*|Figure\s*)\d+', adj_txt, re.I):
+                        fm = re.search(r'(Fig\.?\s*|Figure\s*)(\d+)', adj_txt, re.I)
+                        fnum = int(fm.group(2)) if fm else (fig_counter+1)
+                        fig_counter += 1
+                        # Check if already exists
+                        found = any(f['num']==fnum for f in parsed['figures'])
+                        if not found:
+                            parsed['figures'].append({'num':fnum,'caption':adj_txt,'placed':False,'has_image':True})
+                        else:
+                            for f in parsed['figures']:
+                                if f['num']==fnum: f['has_image']=True
+                        break
+
     # Parse actual tables from docx
     tbl_num = 0
     for table in doc.tables:
@@ -493,7 +533,7 @@ def build_xml(parsed, jm):
 
     cite_ids = {str(r['num']) for r in parsed.get('references',[])}
     table_ids = {str(t['num']): f"tw-{t['num']}" for t in parsed.get('tables',[])}
-    fig_ids = {}
+    fig_ids = {str(f['num']): f'fig-{f["num"]}' for f in parsed.get('figures',[])}
 
     L = []
     L += ['<?xml version="1.0" encoding="UTF-8"?>',
@@ -654,6 +694,12 @@ def build_xml(parsed, jm):
             for tbl in parsed.get('tables',[]):
                 if not tbl.get('placed') and f"Table {tbl['num']}" in para.text:
                     L += build_table_xml(tbl, pfx); tbl['placed'] = True
+            # Place figures inline after the para that first mentions them
+            for fig in parsed.get('figures',[]):
+                if not fig.get('placed'):
+                    ptxt = para.text
+                    if re.search(rf'(Fig\.?\s*|Figure\s*){fig["num"]}\b', ptxt, re.I):
+                        L += build_fig_xml(fig, pfx); fig['placed'] = True
 
         for sub in sec.get('subsections',[]):
             sst = sub.get('sec_type')
@@ -667,6 +713,10 @@ def build_xml(parsed, jm):
                 for tbl in parsed.get('tables',[]):
                     if not tbl.get('placed') and f"Table {tbl['num']}" in para.text:
                         L += build_table_xml(tbl, pfx); tbl['placed'] = True
+                for fig in parsed.get('figures',[]):
+                    if not fig.get('placed'):
+                        if re.search(rf'(Fig\.?\s*|Figure\s*){fig["num"]}\b', para.text, re.I):
+                            L += build_fig_xml(fig, pfx); fig['placed'] = True
             L.append('      </sec>')
 
         L.append('    </sec>'); L.append('')
@@ -675,6 +725,10 @@ def build_xml(parsed, jm):
     for tbl in parsed.get('tables',[]):
         if not tbl.get('placed'):
             L += build_table_xml(tbl, pfx); tbl['placed'] = True
+    # Any unplaced figures at end of body
+    for fig in parsed.get('figures',[]):
+        if not fig.get('placed'):
+            L += build_fig_xml(fig, pfx); fig['placed'] = True
 
     L += ['  </body>','']
 
@@ -694,7 +748,8 @@ def build_xml(parsed, jm):
             iss_r     = cr.get('issue')   or pm.get('issue')   or p.get('issue','')
             fp_r      = cr.get('fpage')   or pm.get('fpage')   or p.get('fpage','')
             lp_r      = cr.get('lpage')   or pm.get('lpage')   or p.get('lpage','')
-            doi       = ref.get('doi')    or cr.get('doi')     or pm.get('doi','')
+            doi_raw   = ref.get('doi')    or cr.get('doi')     or pm.get('doi','')
+            doi       = doi_raw if (doi_raw and '/' in doi_raw) else ''
             pmid      = pm.get('pmid','')
             pub_t     = p.get('pubType','journal')
 
@@ -719,7 +774,7 @@ def build_xml(parsed, jm):
             if iss_r:     L.append(f'          <issue>{xe(iss_r)}</issue>')
             if fp_r:      L.append(f'          <fpage>{xe(fp_r.strip())}</fpage>')
             if lp_r:      L.append(f'          <lpage>{xe(lp_r.strip())}</lpage>')
-            if doi:       L.append(f'          <pub-id pub-id-type="doi">{xe(doi)}</pub-id>')
+            if doi and '/' in doi:  L.append(f'          <pub-id pub-id-type="doi">{xe(doi)}</pub-id>')
             if pmid:      L.append(f'          <pub-id pub-id-type="pmid">{xe(pmid)}</pub-id>')
             if not authors and not title_r:
                 L.append(f'          <!-- RAW: {xe(ref["raw"][:200])} -->')
@@ -772,6 +827,23 @@ def build_table_xml(tbl, pfx):
                 L.append('            </tr>')
             L.append('          </tbody>')
     L += ['        </table>','      </table-wrap>']
+    return L
+
+def build_fig_xml(fig, pfx):
+    """Build JATS <fig> element"""
+    L = []
+    fig_id = f"fig-{fig['num']}"
+    L.append(f'      <fig id="{fig_id}" position="anchor" orientation="portrait">')
+    L.append(f'        <label>Figure {fig["num"]}</label>')
+    cap = re.sub(r'^(Fig\.?\s*|Figure\s*)\d+\s*[:\-\.\s]*', '', fig.get('caption',''), flags=re.I).strip()
+    if cap:
+        cid = nid(pfx, 'cap'); ctid = nid(pfx, 'ctitle')
+        L += [f'        <caption id="{cid}">',
+              f'          <title id="{ctid}">{xe(cap)}</title>',
+              '        </caption>']
+    # Graphic placeholder (actual image not embedded — note added)
+    L.append(f'        <graphic xlink:href="fig{fig['num']}" mimetype="image" mime-subtype="jpeg"/>')
+    L.append('      </fig>')
     return L
 
 def post_process(xml):
