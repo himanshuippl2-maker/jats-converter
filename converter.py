@@ -13,7 +13,9 @@ from docx import Document
 # ── IDs ──────────────────────────────────────────────────────
 _ctr = [0]
 def make_prefix(title=""):
-    return hashlib.md5((title or "article").encode()).hexdigest()[:8]
+    h = hashlib.md5((title or "article").encode()).hexdigest()[:8]
+    # XML IDs must start with letter
+    return 'id' + h
 def nid(pfx, label):
     _ctr[0] += 1
     suf = hashlib.md5(f"{label}-{_ctr[0]}".encode()).hexdigest()[:12]
